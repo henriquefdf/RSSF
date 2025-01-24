@@ -1,15 +1,13 @@
 #include "common.h"
 
-#define BACKLOG 20   // Quantidade de conexões pendentes permitidas
+#define BACKLOG 20   
 
-// Estrutura para guardar info de cada cliente conectado
 typedef struct {
     int socket_fd;
     char type[MAX_TYPE_LEN];
     int x, y;
 } client_info_t;
 
-// Lista global de clientes
 static client_info_t *g_clients = NULL;
 static size_t g_num_clients = 0;
 static pthread_mutex_t g_clients_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -75,7 +73,6 @@ static void broadcast_message(const struct sensor_message *msg) {
 
     for (size_t i = 0; i < g_num_clients; i++) {
         if (strncmp(g_clients[i].type, msg->type, MAX_TYPE_LEN) == 0) {
-            // Envia a mensagem a esse socket
             send(g_clients[i].socket_fd, msg, sizeof(*msg), 0);
         }
     }
@@ -94,12 +91,9 @@ static void* client_thread(void *arg) {
     ssize_t n;
 
     while (1) {
-        // Tenta receber uma mensagem
         n = recv(client_fd, &msg, sizeof(msg), 0);
         if (n == 0) {
             // Cliente desconectou
-            // Precisamos avisar os outros com measurement = -1.0000
-            // Primeiro recupera info do cliente
             pthread_mutex_lock(&g_clients_mutex);
             char client_type[MAX_TYPE_LEN] = "";
             int cx = -1, cy = -1;
@@ -115,7 +109,6 @@ static void* client_thread(void *arg) {
             pthread_mutex_unlock(&g_clients_mutex);
 
             if (client_type[0] != '\0') {
-                // Log no servidor
                 printf("log:\n%s sensor in (%d,%d)\nmeasurement: -1.0000\n\n",
                        client_type, cx, cy);
 
@@ -129,13 +122,11 @@ static void* client_thread(void *arg) {
                 broadcast_message(&out_msg);
             }
 
-            // Remove cliente da lista e fecha
             remove_client(client_fd);
             close(client_fd);
             pthread_exit(NULL);
         }
         else if (n < 0) {
-            // Erro
             perror("recv");
             break;
         }
@@ -144,15 +135,13 @@ static void* client_thread(void *arg) {
             fprintf(stderr, "Mensagem incompleta recebida, encerrando cliente.\n");
             break;
         } else {
-            // Recebemos uma struct sensor_message completa
-            // Se for a primeira vez, armazenamos info do cliente
+
             set_client_info(client_fd, msg.type, msg.coords[0], msg.coords[1]);
 
             // Log no servidor
             printf("log:\n%s sensor in (%d,%d)\nmeasurement: %.4f\n\n",
                    msg.type, msg.coords[0], msg.coords[1], msg.measurement);
 
-            // Retransmite para todos do mesmo tipo
             broadcast_message(&msg);
         }
     }
@@ -226,29 +215,26 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor iniciado (modo %s) na porta %s.\n", use_ipv6 ? "IPv6" : "IPv4", port);
+    //printf("Servidor iniciado (modo %s) na porta %s.\n", use_ipv6 ? "IPv6" : "IPv4", port);
 
-    // Loop principal de aceitar conexões
     while (1) {
         struct sockaddr_storage client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
         int client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_fd < 0) {
             perror("accept");
-            continue; // Tenta de novo
+            continue;
         }
 
-        // Adiciona na lista e cria thread
         add_client(client_fd);
 
         int *arg = malloc(sizeof(int));
         *arg = client_fd;
         pthread_t tid;
         pthread_create(&tid, NULL, client_thread, arg);
-        pthread_detach(tid); // Liberar ao final
+        pthread_detach(tid); 
     }
 
-    // Nunca chega aqui no fluxo normal
     close(listen_fd);
     return 0;
 }

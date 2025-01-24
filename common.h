@@ -21,9 +21,9 @@
 #define MAX_TYPE_LEN 12
 
 struct sensor_message {
-    char  type[MAX_TYPE_LEN];  // "temperature", "humidity", "air_quality"
-    int   coords[2];           // Ex.: [2, 3]
-    float measurement;          // Ex.: 25.3478
+    char  type[MAX_TYPE_LEN]; 
+    int   coords[2];          
+    float measurement;  
 };
 
 // -----------------------------------

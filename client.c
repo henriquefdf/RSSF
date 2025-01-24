@@ -15,15 +15,12 @@ typedef struct neighbor_s {
 static neighbor_t g_known_sensors[MAX_SENSORS_SAME_TYPE];
 static int g_num_known_sensors = 0;
 
-// Protege acesso a g_known_sensors e medição local
 static pthread_mutex_t g_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Dados do sensor local
 static char  g_type[MAX_TYPE_LEN] = "";
 static int   g_x = 0, g_y = 0;
 static float g_my_measurement = 0.0f;
 
-// Intervalo de envio (em segundos) para este tipo
 static int   g_send_interval = 5; // default p/ temperature
 
 // ---------------------------------------
@@ -35,7 +32,6 @@ static void print_usage_and_exit(void) {
     exit(EXIT_FAILURE);
 }
 
-// Retorna 1 se string == "temperature" ou "humidity" ou "air_quality"
 static int valid_type(const char *t) {
     return (
         (strcmp(t, "temperature") == 0) ||
@@ -44,7 +40,6 @@ static int valid_type(const char *t) {
     );
 }
 
-// Retorna se (x,y) é válido (0..9)
 static int coords_valid(int x, int y) {
     return (x >= 0 && x <= 9 && y >= 0 && y <= 9);
 }
@@ -54,16 +49,13 @@ static float get_random_measurement(const char *t) {
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
     float scale = (float)rand() / (float)RAND_MAX; // 0..1
     if (strcmp(t, "temperature") == 0) {
-        // 20..40
-        g_send_interval = TEMP_INTERVAL; // 5
+        g_send_interval = TEMP_INTERVAL;
         return TEMP_MIN + scale * (TEMP_MAX - TEMP_MIN);
     } else if (strcmp(t, "humidity") == 0) {
-        // 10..90
-        g_send_interval = HUM_INTERVAL; // 7
+        g_send_interval = HUM_INTERVAL;
         return HUM_MIN + scale * (HUM_MAX - HUM_MIN);
     } else {
-        // air_quality 15..30
-        g_send_interval = AIR_INTERVAL; // 10
+        g_send_interval = AIR_INTERVAL; 
         return AIR_MIN + scale * (AIR_MAX - AIR_MIN);
     }
 }
@@ -75,7 +67,6 @@ static float get_random_measurement(const char *t) {
 static void get_top3_neighbors(int *out_idx, int *out_count) {
     pthread_mutex_lock(&g_data_mutex);
 
-    // Calcula distâncias de todos os sensores conhecidos
     float dist[MAX_SENSORS_SAME_TYPE];
     for (int i = 0; i < g_num_known_sensors; i++) {
         dist[i] = distance_euclid(g_known_sensors[i].x, g_known_sensors[i].y, g_x, g_y);
@@ -110,7 +101,6 @@ static void get_top3_neighbors(int *out_idx, int *out_count) {
 // ---------------------------------------
 static int update_or_insert_sensor(int rx, int ry, float rmeasurement) {
     pthread_mutex_lock(&g_data_mutex);
-    // Se já existe, atualiza measurement
     for (int i = 0; i < g_num_known_sensors; i++) {
         if (g_known_sensors[i].x == rx && g_known_sensors[i].y == ry) {
             g_known_sensors[i].measurement = rmeasurement;
@@ -118,7 +108,6 @@ static int update_or_insert_sensor(int rx, int ry, float rmeasurement) {
             return i;
         }
     }
-    // Senao insere se tiver espaço
     if (g_num_known_sensors < MAX_SENSORS_SAME_TYPE) {
         g_known_sensors[g_num_known_sensors].x = rx;
         g_known_sensors[g_num_known_sensors].y = ry;
@@ -127,7 +116,6 @@ static int update_or_insert_sensor(int rx, int ry, float rmeasurement) {
         pthread_mutex_unlock(&g_data_mutex);
         return (g_num_known_sensors - 1);
     }
-    // Se estourar, apenas ignora o novo (caso limite)
     pthread_mutex_unlock(&g_data_mutex);
     return -1;
 }
@@ -135,12 +123,10 @@ static int update_or_insert_sensor(int rx, int ry, float rmeasurement) {
 // ---------------------------------------
 // Remove sensor com coords (rx, ry)
 // ---------------------------------------
-// Remove sensor com coords (rx, ry)
 static void remove_sensor(int rx, int ry) {
     pthread_mutex_lock(&g_data_mutex);
     for (int i = 0; i < g_num_known_sensors; i++) {
         if (g_known_sensors[i].x == rx && g_known_sensors[i].y == ry) {
-            // Sobrescreve com o último sensor e reduz o tamanho da lista
             g_known_sensors[i] = g_known_sensors[g_num_known_sensors - 1];
             g_num_known_sensors--;
             break;
@@ -153,12 +139,11 @@ static void remove_sensor(int rx, int ry) {
 // ---------------------------------------
 // Thread de envio periódico
 // ---------------------------------------
-static int g_socket_fd = -1; // socket global
+static int g_socket_fd = -1; 
 
 void* sender_thread(void* arg) {
-    (void)arg; // unused
+    (void)arg; 
     while (1) {
-        // Monta a struct e envia
         struct sensor_message msg;
         memset(&msg, 0, sizeof(msg));
 
@@ -170,7 +155,6 @@ void* sender_thread(void* arg) {
         pthread_mutex_unlock(&g_data_mutex);
 
         send(g_socket_fd, &msg, sizeof(msg), 0);
-        // Dorme
         sleep(g_send_interval);
     }
     return NULL;
@@ -186,49 +170,36 @@ void* receiver_thread(void* arg) {
     while (1) {
         ssize_t n = recv(g_socket_fd, &in_msg, sizeof(in_msg), 0);
         if (n <= 0) {
-            // Desconexão ou erro
             fprintf(stderr, "Conexão com o servidor encerrada.\n");
             close(g_socket_fd);
             exit(EXIT_FAILURE);
         }
-        // Recebemos uma mensagem
-        // Monta log do cliente:
-        // log:
-        // <type> sensor in (<x>,<y>)
-        // measurement: <measurement>
-        // action: <???>
+
         printf("log:\n%s sensor in (%d,%d)\nmeasurement: %.4f\n",
                in_msg.type,
                in_msg.coords[0], in_msg.coords[1],
                in_msg.measurement);
 
-        // Verifica se é do mesmo local do cliente
         if (in_msg.coords[0] == g_x && in_msg.coords[1] == g_y) {
-            // same location -> descartar
             printf("action: same location\n\n");
             continue;
         }
 
-        // Verifica se é -1 => removed
         if (fabsf(in_msg.measurement - (-1.0f)) < 0.0001f) {
-            // Remove e imprime "removed"
             remove_sensor(in_msg.coords[0], in_msg.coords[1]);
             printf("action: removed\n\n");
             continue;
         }
 
-        // Caso normal: checar se está no top 3
-        // 1) Atualiza/insere info do sensor
+
         int idx = update_or_insert_sensor(in_msg.coords[0],
                                           in_msg.coords[1],
                                           in_msg.measurement);
 
-        // 2) Obter top 3 e ver se esse sensor está lá
         int topIdx[3];
         int topCount;
         get_top3_neighbors(topIdx, &topCount);
 
-        // Verifica se esse sensor está no top3
         int is_top3 = 0;
         for (int i = 0; i < topCount; i++) {
             if (idx == topIdx[i]) {
@@ -237,14 +208,11 @@ void* receiver_thread(void* arg) {
             }
         }
         if (idx < 0) {
-            // Não conseguimos inserir -> ou a lista está cheia
-            // mas se não estava, já demos "action: not neighbor"? 
-            // Vamos considerar que não neighbor se a lista está saturada
+
             printf("action: not neighbor\n\n");
             continue;
         }
         if (!is_top3) {
-            // Não está entre os três vizinhos mais próximos -> descartar
             printf("action: not neighbor\n\n");
             continue;
         }
@@ -260,7 +228,6 @@ void* receiver_thread(void* arg) {
             float correction = 0.1f * (diff) / (d + 1.0f);
             g_my_measurement = old_val + correction;
 
-            // Ajustar limites
             if (strcmp(g_type, "temperature") == 0) {
                 g_my_measurement = clamp(g_my_measurement, TEMP_MIN, TEMP_MAX);
             } else if (strcmp(g_type, "humidity") == 0) {
@@ -281,9 +248,7 @@ void* receiver_thread(void* arg) {
 // MAIN (client)
 // ---------------------------------------
 int main(int argc, char *argv[]) {
-    // Exemplo de parsing robusto
-    // Esperado:
-    // ./client <server_ip> <port> -type <temperature|humidity|air_quality> -coords <x> <y>
+
     if (argc < 7) {
         fprintf(stderr, "Error: Invalid number of arguments\n");
         print_usage_and_exit();
@@ -292,9 +257,7 @@ int main(int argc, char *argv[]) {
     char *server_ip   = argv[1];
     char *server_port = argv[2];
 
-    // Precisamos encontrar -type e -coords na ordem
-    // Formato fixo: argv[3] = "-type", argv[4] = <tipo>
-    //               argv[5] = "-coords", argv[6] = <x>, argv[7] = <y>
+
     if (strcmp(argv[3], "-type") != 0) {
         fprintf(stderr, "Error: Expected '-type' argument\n");
         print_usage_and_exit();
@@ -312,7 +275,6 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc < 8) {
-        // Falta x e y
         fprintf(stderr, "Error: Invalid number of arguments\n");
         print_usage_and_exit();
     }
@@ -324,14 +286,12 @@ int main(int argc, char *argv[]) {
         print_usage_and_exit();
     }
 
-    // Pronto, parse OK. Gera medição inicial
     g_my_measurement = get_random_measurement(g_type);
 
-    // Conectar ao servidor (IPv4 ou IPv6)
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family   = AF_UNSPEC; // tanto faz IPv4 ou IPv6
+    hints.ai_family   = AF_UNSPEC; 
 
     int err = getaddrinfo(server_ip, server_port, &hints, &res);
     if (err != 0) {
@@ -343,10 +303,9 @@ int main(int argc, char *argv[]) {
     struct addrinfo *rp;
     for (rp = res; rp != NULL; rp = rp->ai_next) {
         sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sockfd < 0) continue; // tenta próximo
+        if (sockfd < 0) continue; 
 
         if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == 0) {
-            // Conectou
             break;
         }
         close(sockfd);
@@ -359,12 +318,10 @@ int main(int argc, char *argv[]) {
     freeaddrinfo(res);
     g_socket_fd = sockfd;
 
-    // Cria threads de envio e recepção
     pthread_t stid, rtid;
     pthread_create(&stid, NULL, sender_thread, NULL);
     pthread_create(&rtid, NULL, receiver_thread, NULL);
 
-    // Aguarda as threads (na prática, ficam em loop infinito)
     pthread_join(stid, NULL);
     pthread_join(rtid, NULL);
 
